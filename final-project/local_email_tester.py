@@ -2,7 +2,7 @@ import os
 import shutil
 import email
 from datetime import datetime
-from email_spam_detector import SpamDetector, process_email
+from run_spam_detector import SpamDetector, process_email
 import logging
 
 # Set up logging
@@ -18,7 +18,7 @@ class LocalEmailProcessor:
         input_dir="input_emails",
         spam_dir="processed_emails/spam",
         ham_dir="processed_emails/ham",
-        threshold=0.4,
+        threshold=0.7,
     ):
         """
         Initialize the local email processor.
@@ -57,17 +57,8 @@ class LocalEmailProcessor:
             return False
 
     def process_email_file(self, file_path):
-        """
-        Process a single email file and detect if it's spam.
-
-        Args:
-            file_path: Path to the email file
-
-        Returns:
-            dict: Detection result with spam status and probability
-        """
-        # Extract email content
-        content = self.spam_detector.extract_email_content(file_path)
+        # Extract email content and header score
+        content, header_spam_score = self.spam_detector.extract_email_content(file_path)
 
         if not content:
             logger.warning(f"Could not extract content from {file_path}")
@@ -75,6 +66,16 @@ class LocalEmailProcessor:
 
         # Process with spam detector
         result = process_email(content, self.spam_detector)
+
+        # Add this debug logging
+        details = result.get("details", {})
+        logger.info(f"\nFile: {os.path.basename(file_path)}")
+        logger.info(f"NB: {details.get('naive_bayes_probability', 0):.4f}")
+        logger.info(f"SVM: {details.get('svm_probability', 0):.4f}")
+        logger.info(f"HMM: {details.get('hmm_probability', 0):.4f}")
+        logger.info(f"Indicator: {details.get('indicator_score', 0):.4f}")
+        logger.info(f"Combined: {result.get('spam_probability', 0):.4f}")
+        logger.info(f"Is Spam: {result.get('is_spam', False)}")
 
         # Add additional info to result
         result["file_path"] = file_path
