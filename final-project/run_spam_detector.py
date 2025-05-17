@@ -1039,27 +1039,148 @@ class SpamDetector:
 
         return is_spam, combined_prob, detailed_results
 
+    def visualize_email_prediction(self, email_content, output_path=None):
+        """
+        Visualize the prediction process for a specific email
+
+        Args:
+            email_content: Content of the email to analyze
+            output_path: Path to save the visualization (default: visualizations directory)
+        """
+        if output_path is None:
+            output_path = os.path.join(self.visualization_dir, "email_prediction.png")
+
+        # Process the email and get probabilities
+        is_spam, combined_prob, details = self.predict_email(email_content)
+
+        # Extract probabilities
+        nb_prob = details["naive_bayes_probability"]
+        svm_prob = details["svm_probability"]
+        hmm_prob = details["hmm_probability"]
+        indicator_score = details["indicator_score"]
+
+        # Create a figure with 2 subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7))
+
+        # Plot 1: Bar chart showing individual model predictions
+        models = ["Naive Bayes", "SVM", "HMM", "Combined"]
+        probabilities = [nb_prob, svm_prob, hmm_prob, combined_prob]
+        colors = ["blue", "red", "purple", "green"]
+
+        ax1.bar(models, probabilities, color=colors, alpha=0.7)
+        ax1.set_ylim(0, 1)
+        ax1.set_ylabel("Spam Probability")
+        ax1.set_title("Model Predictions")
+        ax1.axhline(y=0.5, color="black", linestyle="--", label="Decision Threshold")
+
+        # Add probability values on bars
+        for i, v in enumerate(probabilities):
+            ax1.text(i, v + 0.05, f"{v:.2f}", ha="center")
+
+        # Plot 2: Scatter plot showing relationship between NB and SVM with HMM as color
+        ax2.scatter(
+            nb_prob,
+            svm_prob,
+            c=hmm_prob,
+            cmap="viridis",
+            s=200,
+            marker="o",
+            edgecolors="black",
+        )
+
+        # Add decision quadrants
+        ax2.axhline(y=0.5, color="gray", linestyle="--", alpha=0.5)
+        ax2.axvline(x=0.5, color="gray", linestyle="--", alpha=0.5)
+
+        # Add quadrant labels
+        ax2.text(0.25, 0.25, "Both predict HAM", ha="center", va="center", fontsize=10)
+        ax2.text(
+            0.75, 0.25, "NB: SPAM\nSVM: HAM", ha="center", va="center", fontsize=10
+        )
+        ax2.text(
+            0.25, 0.75, "NB: HAM\nSVM: SPAM", ha="center", va="center", fontsize=10
+        )
+        ax2.text(0.75, 0.75, "Both predict SPAM", ha="center", va="center", fontsize=10)
+
+        # Add colorbar for HMM probability
+        scatter = ax2.scatter(
+            [nb_prob],
+            [svm_prob],
+            c=[hmm_prob],
+            cmap="viridis",
+            s=200,
+            marker="o",
+            edgecolors="black",
+        )
+        cbar = plt.colorbar(scatter, ax=ax2)
+        cbar.set_label("HMM Probability")
+
+        # Mark the current email's position
+        ax2.plot([nb_prob], [svm_prob], "ro", ms=10, mfc="none", mew=2)
+
+        # Add grid and labels
+        ax2.grid(True, alpha=0.3)
+        ax2.set_xlabel("Naive Bayes Probability")
+        ax2.set_ylabel("SVM Probability")
+        ax2.set_xlim(0, 1)
+        ax2.set_ylim(0, 1)
+        ax2.set_title("Relationship Between Model Probabilities")
+
+        # Add email details as text
+        plt.figtext(
+            0.5,
+            0.01,
+            f"Email Classification: {'SPAM' if is_spam else 'HAM'} (Combined Probability: {combined_prob:.2f})",
+            ha="center",
+            fontsize=12,
+            bbox={"facecolor": "lightgray", "alpha": 0.5},
+        )
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+
+        logger.info(f"Email prediction visualization saved to {output_path}")
+
+        return output_path
+
     def process_email_file(self, file_path):
-        """
-        Process a single email file and detect if it's spam.
-        """
         # Extract email content and header score
-        content, header_spam_score = self.extract_email_content(file_path)
+        content, header_spam_score = self.spam_detector.extract_email_content(file_path)
 
         if not content:
             logger.warning(f"Could not extract content from {file_path}")
             return None
 
         # Process with spam detector
-        prediction, probability = self.predict_email(content, header_spam_score)
+        result = process_email(content, self.spam_detector)
 
-        result = {
-            "is_spam": bool(prediction),
-            "spam_probability": float(probability),
-            "file_path": file_path,
-            "file_name": os.path.basename(file_path),
-            "processed_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        # Add debugging logging
+        details = result.get("details", {})
+        logger.info(f"\nFile: {os.path.basename(file_path)}")
+        logger.info(f"NB: {details.get('naive_bayes_probability', 0):.4f}")
+        logger.info(f"SVM: {details.get('svm_probability', 0):.4f}")
+        logger.info(f"HMM: {details.get('hmm_probability', 0):.4f}")
+        logger.info(f"Indicator: {details.get('indicator_score', 0):.4f}")
+        logger.info(f"Combined: {result.get('spam_probability', 0):.4f}")
+        logger.info(f"Is Spam: {result.get('is_spam', False)}")
+
+        # Generate visualization for this email
+        filename = os.path.basename(file_path).replace(".eml", "")
+        visualization_path = os.path.join(
+            "visualizations", f"{filename}_prediction.png"
+        )
+        os.makedirs("visualizations", exist_ok=True)
+
+        # Create visualization
+        self.spam_detector.visualize_email_prediction(content, visualization_path)
+        logger.info(f"Created visualization: {visualization_path}")
+
+        # Add additional info to result
+        result["file_path"] = file_path
+        result["file_name"] = os.path.basename(file_path)
+        result["processed_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result["visualization_path"] = visualization_path
 
         return result
 

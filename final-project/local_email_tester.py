@@ -4,6 +4,7 @@ import email
 from datetime import datetime
 from run_spam_detector import SpamDetector, process_email
 import logging
+import matplotlib.pyplot as plt
 
 # Set up logging
 logging.basicConfig(
@@ -55,6 +56,82 @@ class LocalEmailProcessor:
                 "Please train the models first by running the email_spam_detector.py script."
             )
             return False
+
+    def create_summary_visualization(self, results):
+        """Create a summary visualization showing all emails classified"""
+        if not results:
+            logger.warning("No results to visualize")
+            return None
+
+        # Extract data
+        filenames = []
+        nb_probs = []
+        svm_probs = []
+        hmm_probs = []
+        combined_probs = []
+        is_spams = []
+
+        for result in results:
+            filenames.append(os.path.basename(result["file_path"]))
+            details = result.get("details", {})
+            nb_probs.append(details.get("naive_bayes_probability", 0))
+            svm_probs.append(details.get("svm_probability", 0))
+            hmm_probs.append(details.get("hmm_probability", 0))
+            combined_probs.append(result.get("spam_probability", 0))
+            is_spams.append(result.get("is_spam", False))
+
+        # Create visualization
+        plt.figure(figsize=(15, 10))
+
+        # Use a colormap based on spam/ham classification
+        colors = ["green" if not is_spam else "red" for is_spam in is_spams]
+
+        # Create scatter plot
+        plt.scatter(nb_probs, svm_probs, c=hmm_probs, cmap="viridis", s=200, alpha=0.7)
+
+        # Add labels
+        for i, filename in enumerate(filenames):
+            plt.annotate(filename, (nb_probs[i], svm_probs[i]), fontsize=8)
+
+        # Add decision lines
+        plt.axhline(y=0.5, color="gray", linestyle="--", alpha=0.5)
+        plt.axvline(x=0.5, color="gray", linestyle="--", alpha=0.5)
+
+        # Add quadrant labels
+        plt.text(0.25, 0.25, "Both predict HAM", ha="center", va="center", fontsize=12)
+        plt.text(
+            0.75, 0.25, "NB: SPAM\nSVM: HAM", ha="center", va="center", fontsize=12
+        )
+        plt.text(
+            0.25, 0.75, "NB: HAM\nSVM: SPAM", ha="center", va="center", fontsize=12
+        )
+        plt.text(0.75, 0.75, "Both predict SPAM", ha="center", va="center", fontsize=12)
+
+        # Add colorbar for HMM probability
+        scatter = plt.scatter(
+            nb_probs, svm_probs, c=hmm_probs, cmap="viridis", s=200, alpha=0.7
+        )
+        cbar = plt.colorbar(scatter)
+        cbar.set_label("HMM Probability")
+
+        # Add grid and labels
+        plt.grid(True, alpha=0.3)
+        plt.xlabel("Naive Bayes Probability")
+        plt.ylabel("SVM Probability")
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.title("Email Classification Overview")
+
+        # Save the visualization
+        os.makedirs("visualizations", exist_ok=True)
+        visualization_path = os.path.join(
+            "visualizations", "classification_summary.png"
+        )
+        plt.savefig(visualization_path, dpi=300)
+        plt.close()
+
+        logger.info(f"Summary visualization saved to {visualization_path}")
+        return visualization_path
 
     def process_email_file(self, file_path):
         # Extract email content and header score
@@ -137,6 +214,8 @@ class LocalEmailProcessor:
         spam_count = 0
         ham_count = 0
 
+        results = []
+
         # Process each file
         for file_name in files:
             file_path = os.path.join(self.input_dir, file_name)
@@ -145,6 +224,7 @@ class LocalEmailProcessor:
             result = self.process_email_file(file_path)
 
             if result:
+                results.append(result)  # Store the result
                 is_spam = result["is_spam"]
                 probability = result["spam_probability"]
 
@@ -157,6 +237,9 @@ class LocalEmailProcessor:
                 else:
                     ham_count += 1
                     logger.info(f"HAM ({probability:.4f}): {file_name} -> {new_path}")
+
+        if results:
+            self.create_summary_visualization(results)
 
         logger.info(f"Processing complete. Spam: {spam_count}, Ham: {ham_count}")
         return spam_count, ham_count
